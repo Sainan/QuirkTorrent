@@ -1,0 +1,171 @@
+local { crypto, scheduler, socket } = require "*"
+
+local function be_encode(data)
+	if type(data) == "string" then
+		return #data .. ":" .. data
+	elseif type(data) == "number" then
+		return "i" .. data .. "e"
+	elseif type(data) == "table" then
+		if #data == 0 then
+			local str = "d"
+			local keys = data:keys():sort()
+			for keys as key do
+				--assert(type(key) == "string")
+				str ..= be_encode(key)
+				str ..= be_encode(data[key])
+			end
+			return str .. "e"
+		else
+			local str = "l"
+			for data as value do
+				str ..= be_encode(value)
+			end
+			return str .. "e"
+		end
+	else
+		error("Unexpected type of data: "..type(data))
+	end
+end
+
+local function be_decode(data, i = 1)
+	if data[i] == "i" then
+		local e = data:find("e", i)
+		return tonumber(data:sub(i + 1, e - 1)), e + 1
+	elseif data[i] == "d" then
+		++i
+		local t = {}
+		while data[i] ~= "e" do
+			local key, value
+			key, i = be_decode(data, i)
+			--assert(type(key) == "string")
+			value, i = be_decode(data, i)
+			t[key] = value
+		end
+		return t, i + 1
+	elseif data[i] == "l" then
+		++i
+		local t = {}
+		while data[i] ~= "e" do
+			local value
+			value, i = be_decode(data, i)
+			t:insert(value)
+		end
+		return t, i + 1
+	else
+		local c = data:find(":", i)
+		local l = tonumber(data:sub(i, c - 1))
+		i = c + 1
+		return data:sub(i, i + l - 1), i + l
+	end
+end
+
+local function bt_recv(s)
+	local data = s:recv()
+	if data and #data >= 4 then
+		local len = ">I4":unpack(data)
+		data = data:sub(5)
+		while #data < len do
+			data ..= s:recv(data)
+		end
+		if #data > len then
+			s:unrecv(data:sub(1 + len))
+			data = data:sub(1, len)
+		end
+		return data
+	end
+end
+
+local function bt_send(s, data)
+	return s:send(">s4":pack(data))
+end
+
+--[[local demo_info = be_encode({
+	name = "lol",
+	length = 0x10 * 10000,
+	["piece length"] = 0x10,
+	pieces = "1337133713371337133713371337133713371337":rep(10000):fromhex()
+})
+
+local demo_infohash = crypto.sha1(demo_info, true)
+
+print("magnet:?xt=urn:btih:" .. require"base32".encode(demo_infohash) .. "&x.pe=x.x.x.x:1337")]]
+
+--local cache = setmetatable({}, { __mode = "v" }) -- If caching torrents from HTTP sources, this would make sense, assuming the table values are reference types (tables).
+
+local index = {}
+for io.listdir("torrents") as file do
+	local data = io.contents(file)
+	local metainfo = be_decode(data)
+	local info = be_encode(metainfo.info)
+	assert(info in data)
+	local infohash = crypto.sha1(info, true)
+	print("Added "..infohash:tohex().." to index")
+	index[infohash] = info
+end
+
+local sched = new scheduler()
+socket.bind(sched, 1337, |s| -> do
+	xpcall(function()
+		local handshake = s:recv()
+		if handshake and #handshake == 68 and handshake:startswith("\x13BitTorrent protocol") then
+			local extensions, infohash, peerid = ">I8c20c20":unpack(handshake, 21)
+			peerid = peerid:tohex()
+			print(peerid .. " - Connected for infohash " .. infohash:tohex())
+			--print(dumpvar($object(extensions, infohash, peerid)))
+			local info = index[infohash]
+			if info and (extensions & 0x100000) == 0x100000 then
+				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x00" .. infohash .. "Sainan/magnet-seeder")
+				local ut_metadata
+				while data := bt_recv(s) do
+					if #data == 0 then
+						--print(peerid .. "- Keepalive")
+						--s:send("\x00\x00\x00\x00")
+						break -- A keepalive will probably not be needed just for downloading the info dict
+					else
+						local msgid = ">I1":unpack(data, 1)
+						if msgid == 20 then
+							local ext_msgid = ">I1":unpack(data, 2)
+							if ext_msgid == 0 then
+								local msg = be_decode(data:sub(3))
+								--print("Extension protocol handshake: " .. dumpvar(msg))
+								if msg.metadata_size then
+									--print(peerid .. " - Client provided metadata_size")
+									break -- Client already has the info dict, no need to continue this connection.
+								end
+								if msg.m?.ut_metadata then
+									ut_metadata = msg.m.ut_metadata
+									--print("client has ut_metadata: " .. tostring(ut_metadata))
+									bt_send(s, ">I1I1":pack(20, 0) .. be_encode{
+										m = { ut_metadata = ut_metadata },
+										metadata_size = #info,
+										v = "https://github.com/Sainan/magnet-seeder",
+									})
+								end
+								if not ut_metadata then
+									break
+								end
+							elseif ext_msgid == ut_metadata then
+								local msg = be_decode(data:sub(3))
+								--print("ut_metadata message: " .. dumpvar(msg))
+								if msg.msg_type == 0 then
+									print(peerid .. " - Request for piece " .. msg.piece)
+									local offset = msg.piece * 16384
+									bt_send(s, ">I1I1":pack(20, ut_metadata) .. be_encode{ msg_type = 1, piece = msg.piece, total_size = #info } .. info:sub(1 + offset, offset + 16384))
+								end
+							else
+								print("Unhandled extension protocol message: " .. data:tohex())
+							end
+						else
+							print("Unhandled message: " .. data:tohex())
+						end
+					end
+				end
+			end
+			print(peerid .. " - Closing")
+		end
+	end, function(e)
+		print(e)
+	end)
+	s:close()
+end)
+sched:run()
