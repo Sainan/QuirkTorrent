@@ -133,6 +133,7 @@ socket.bind(sched, 1337, |s| -> do
 										m = { ut_metadata = ut_metadata },
 										metadata_size = #info, -- Providing this field in the handshake implies knowledge of the entire info dict
 										v = "https://github.com/Sainan/magnet-seeder",
+										upload_only = 1, -- Indicate that we will not be downloading anything as per BEP 21
 									})
 								end
 								if not ut_metadata then
