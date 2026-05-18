@@ -93,6 +93,7 @@ print("magnet:?xt=urn:btih:" .. require"base32".encode(demo_infohash) .. "&x.pe=
 --local cache = setmetatable({}, { __mode = "v" }) -- If caching torrents from HTTP sources, this would make sense, assuming the table values are reference types (tables).
 
 local index = {}
+local swarms = {}
 for io.listdir("torrents") as file do
 	local data = io.contents(file)
 	local metainfo = be_decode(data)
@@ -101,7 +102,21 @@ for io.listdir("torrents") as file do
 	local infohash = crypto.sha1(info, true)
 	print("Added "..infohash:tohex().." to index")
 	index[infohash] = info
+	swarms[infohash] = {}
 end
+
+local function compact_peer(ip, port)
+	local tmp = ip:split("."):map(|x| -> ">I1":pack(tonumber(x)))
+	tmp:insert(">I2":pack(port))
+	return tmp:concat("")
+end
+assert(compact_peer("1.2.3.4", 0x5678) == "\x01\x02\x03\x04\x56\x78")
+
+local function uncompact_peer(str)
+	local a, b, c, d, port = ">I1I1I1I1I2":unpack(str)
+	return $"{a}.{b}.{c}.{d}:{port}"
+end
+assert(uncompact_peer("\x01\x02\x03\x04\x56\x78") == "1.2.3.4:22136")
 
 local sched = new scheduler()
 socket.bind(sched, 6881, |s| -> do
@@ -113,32 +128,58 @@ socket.bind(sched, 6881, |s| -> do
 			print(peerid .. " - Connected for infohash " .. infohash:tohex())
 			--print(dumpvar($object(extensions, infohash, peerid)))
 			local info = index[infohash]
-			if info and (extensions & 0x100000) == 0x100000 then
-				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x00" .. infohash .. "Sainan/magnet-seeder")
+			if info
+				and (extensions & 4) ~= 0 -- BEP 6
+				and (extensions & 0x100000) ~= 0 -- BEP 10
+			then
+				local contact = compact_peer(s:getpeer())
+				swarms[infohash][contact] = math.maxinteger
+				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x04" .. infohash .. "Sainan/magnet-seeder")
 				local ut_metadata
+				--local ut_pex
 				while data := bt_recv(s) do
 					if #data == 0 then
 						--print(peerid .. "- Keepalive")
 					else
 						local msgid = ">I1":unpack(data, 1)
-						if msgid == 20 then
+						--[[if msgid == 1 then
+							print(peerid .. " - unchoked")
+							bt_send(s, "\x03") -- not interested
+						elseif msgid == 5 or msgid == 0x0E or msgid == 0x0F then
+							print(peerid .. " - bitfield: " .. data:tohex())
+							bt_send(s, "\x0F") -- Have None from BEP 6
+						else]]if msgid == 20 then
 							local ext_msgid = ">I1":unpack(data, 2)
 							if ext_msgid == 0 then
 								local msg = be_decode(data:sub(3))
-								--print("Extension protocol handshake: " .. dumpvar(msg))
+								print("Extension protocol handshake: " .. dumpvar(msg))
 								if msg.m?.ut_metadata then
 									ut_metadata = msg.m.ut_metadata
 									--print("client has ut_metadata: " .. tostring(ut_metadata))
 									bt_send(s, ">I1I1":pack(20, 0) .. be_encode{
-										m = { ut_metadata = ut_metadata },
+										m = {
+											ut_metadata = ut_metadata,
+											ut_pex = msg.m.ut_pex,
+										},
 										metadata_size = #info, -- Providing this field in the handshake implies knowledge of the entire info dict
 										v = "https://github.com/Sainan/magnet-seeder",
-										upload_only = 1, -- Indicate that we will not be downloading anything as per BEP 21
+										--upload_only = 1, -- Indicate that we will not be downloading anything as per BEP 21 (will cause seeders to disconnect from us)
 									})
 								end
 								if not ut_metadata then
 									print(peerid .. " - Client doesn't support ut_metadata")
 									break
+								end
+								if msg.m?.ut_pex then
+									--ut_pex = msg.m.ut_pex
+									swarms[infohash]:filter(|last_seen| -> last_seen >= (os.unixseconds() - 60)) -- Run "GC" over swarm (BEP 11 says we should only indicate peers we are actively connected to, but given our upload_only status, this is a bad critera.)
+									local contacts = swarms[infohash]:keys()
+									print(peerid .. " - Informing of " .. #contacts .. " peer(s) in this swarm")
+									bt_send(s, ">I1I1":pack(20, msg.m.ut_pex) .. be_encode{ added = contacts:concat("") })
+									local msg = { added = contacts:concat("") }
+									for i = 1, #msg.added, 6 do
+										print(peerid .. " - Sending PEX.added " .. uncompact_peer(msg.added:sub(i, i + 5)))
+									end
 								end
 							elseif ext_msgid == ut_metadata then
 								local msg = be_decode(data:sub(3))
@@ -148,6 +189,18 @@ socket.bind(sched, 6881, |s| -> do
 									local offset = msg.piece * 16384
 									bt_send(s, ">I1I1":pack(20, ut_metadata) .. be_encode{ msg_type = 1, piece = msg.piece, total_size = #info } .. info:sub(1 + offset, offset + 16384))
 								end
+							--[[elseif ext_msgid == ut_pex then
+								local msg = be_decode(data:sub(3))
+								if msg.added then
+									for i = 1, #msg.added, 6 do
+										print(peerid .. " - PEX.added " .. uncompact_peer(msg.added:sub(i, i + 5)))
+									end
+								end
+								if msg.dropped then
+									for i = 1, #msg.dropped, 6 do
+										print(peerid .. " - PEX.dropped " .. uncompact_peer(msg.dropped:sub(i, i + 5)))
+									end
+								end]]
 							else
 								print(peerid .. " - Unhandled extension protocol message: " .. data:tohex())
 							end
@@ -156,6 +209,7 @@ socket.bind(sched, 6881, |s| -> do
 						end
 					end
 				end
+				swarms[infohash][contact] = os.unixseconds()
 			end
 			print(peerid .. " - Closing")
 		end
