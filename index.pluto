@@ -113,8 +113,11 @@ socket.bind(sched, 6881, |s| -> do
 			print(peerid .. " - Connected for infohash " .. infohash:tohex())
 			--print(dumpvar($object(extensions, infohash, peerid)))
 			local info = index[infohash]
-			if info and (extensions & 0x100000) == 0x100000 then
-				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x00" .. infohash .. "Sainan/magnet-seeder")
+			if info
+				--and (extensions & 4) ~= 0 -- BEP 6
+				and (extensions & 0x100000) ~= 0 -- BEP 10
+			then
+				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x04" .. infohash .. "Sainan/magnet-seeder")
 				local ut_metadata
 				while data := bt_recv(s) do
 					if #data == 0 then
