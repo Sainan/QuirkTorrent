@@ -119,8 +119,6 @@ socket.bind(sched, 1337, |s| -> do
 				while data := bt_recv(s) do
 					if #data == 0 then
 						--print(peerid .. "- Keepalive")
-						--s:send("\x00\x00\x00\x00")
-						break -- A keepalive will probably not be needed just for downloading the info dict
 					else
 						local msgid = ">I1":unpack(data, 1)
 						if msgid == 20 then
@@ -128,20 +126,17 @@ socket.bind(sched, 1337, |s| -> do
 							if ext_msgid == 0 then
 								local msg = be_decode(data:sub(3))
 								--print("Extension protocol handshake: " .. dumpvar(msg))
-								if msg.metadata_size then
-									--print(peerid .. " - Client provided metadata_size")
-									break -- Client already has the info dict, no need to continue this connection.
-								end
 								if msg.m?.ut_metadata then
 									ut_metadata = msg.m.ut_metadata
 									--print("client has ut_metadata: " .. tostring(ut_metadata))
 									bt_send(s, ">I1I1":pack(20, 0) .. be_encode{
 										m = { ut_metadata = ut_metadata },
-										metadata_size = #info,
+										metadata_size = #info, -- Providing this field in the handshake implies knowledge of the entire info dict
 										v = "https://github.com/Sainan/magnet-seeder",
 									})
 								end
 								if not ut_metadata then
+									print(peerid .. " - Client doesn't support ut_metadata")
 									break
 								end
 							elseif ext_msgid == ut_metadata then
@@ -153,10 +148,10 @@ socket.bind(sched, 1337, |s| -> do
 									bt_send(s, ">I1I1":pack(20, ut_metadata) .. be_encode{ msg_type = 1, piece = msg.piece, total_size = #info } .. info:sub(1 + offset, offset + 16384))
 								end
 							else
-								print("Unhandled extension protocol message: " .. data:tohex())
+								print(peerid .. " - Unhandled extension protocol message: " .. data:tohex())
 							end
 						else
-							print("Unhandled message: " .. data:tohex())
+							print(peerid .. " - Unhandled message: " .. data:tohex())
 						end
 					end
 				end
