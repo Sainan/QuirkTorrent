@@ -88,7 +88,7 @@ end
 
 local demo_infohash = crypto.sha1(demo_info, true)
 
-print("magnet:?xt=urn:btih:" .. require"base32".encode(demo_infohash) .. "&x.pe=x.x.x.x:1337")]]
+print("magnet:?xt=urn:btih:" .. require"base32".encode(demo_infohash) .. "&x.pe=x.x.x.x:6881")]]
 
 --local cache = setmetatable({}, { __mode = "v" }) -- If caching torrents from HTTP sources, this would make sense, assuming the table values are reference types (tables).
 
@@ -104,7 +104,7 @@ for io.listdir("torrents") as file do
 end
 
 local sched = new scheduler()
-socket.bind(sched, 1337, |s| -> do
+socket.bind(sched, 6881, |s| -> do
 	xpcall(function()
 		local handshake = s:recv()
 		if handshake and #handshake == 68 and handshake:startswith("\x13BitTorrent protocol") then
@@ -164,4 +164,5 @@ socket.bind(sched, 1337, |s| -> do
 	end)
 	s:close()
 end)
+print("Bound to TCP/6881")
 sched:run()
