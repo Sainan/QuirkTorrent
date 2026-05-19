@@ -104,7 +104,8 @@ for io.listdir("torrents") as file do
 end
 
 local sched = new scheduler()
-socket.bind(sched, 6881, |s| -> do
+
+--[[socket.bind(sched, 6881, |s| -> do
 	xpcall(function()
 		local handshake = s:recv()
 		if handshake and #handshake == 68 and handshake:startswith("\x13BitTorrent protocol") then
@@ -167,5 +168,49 @@ socket.bind(sched, 6881, |s| -> do
 	end)
 	s:close()
 end)
-print("Bound to TCP/6881")
+print("Bound to TCP/6881")]]
+
+local utp_connections = {}
+
+sched:add(function()
+	local serv = socket.udpserver(6881)
+	print("Bound to UDP/6881")
+	while data := serv:recv() do
+		local ip, port = serv:getpeer()
+		local endpoint = ip .. ":" .. port
+		print(endpoint .. " - " .. data:tohex())
+		-- (DHT traffic) 64313a6164323a696432303a13ef2d1e32b0605fac95128a6d351f07aa4d0209393a696e666f5f6861736832303a13ef2bf1035c96120de19a9e06c7addfcec1b0cd65313a71393a6765745f7065657273313a74323a7bdf313a76343a4c54020a313a79313a7165
+		-- (uTP traffic) 4100e04d 0d117708 00000000 00000000 7e930000
+		if #data >= 20 then
+			local typever, ext, conn_id, ts_micro, ts_micro_delta, wnd_size, seq_nr, ack_nr = ">I1I1I2I4I4I4I2I2":unpack(data)
+			--if typever == 0x01 or typever == 0x11 or typever == 0x21 or typever == 0x31 or typever == 0x41 then
+			if (typever & 0xf) == 1 and (typever >> 4) <= 4 then
+				print(dumpvar($object(typever, ext, conn_id, ts_micro, ts_micro_delta, wnd_size, seq_nr, ack_nr)))
+				if not utp_connections[endpoint] then
+					utp_connections[endpoint] = {
+						seq_nr = math.random(0, 0xffff),
+					}
+				end
+				local now = os.micros() & 0xffffffff
+				utp_connections[endpoint].reply_micros = (now - ts_micro) & 0xffffffff
+				utp_connections[endpoint].ack_nr = seq_nr
+				seq_nr = utp_connections[endpoint].seq_nr
+
+				local conn_id_send = (typever == 0x41) ? conn_id : ((conn_id - 1) & 0xffff)
+				print("conn_id_send = " .. conn_id_send)
+
+				local resp = ">I1I1I2I4I4I4I2I2":pack(0x21, 0, conn_id_send, now, utp_connections[endpoint].reply_micros, 0x100000, seq_nr, utp_connections[endpoint].ack_nr)
+				print("Sending ack: " .. resp:tohex())
+				serv:send(resp)
+				utp_connections[endpoint].seq_nr = (seq_nr + 1) & 0xffff
+
+				if typever == 0x01 then
+					print("Layer 7 traffic: " .. data:sub(21):tohex())
+					-- TODO
+				end
+			end
+		end
+	end
+end)
+
 sched:run()
