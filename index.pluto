@@ -79,6 +79,19 @@ local function bt_send(s, data)
 	return s:send(">s4":pack(data))
 end
 
+local function compact_peer(ip, port)
+	local tmp = ip:split("."):map(|x| -> ">I1":pack(tonumber(x)))
+	tmp:insert(">I2":pack(port))
+	return tmp:concat("")
+end
+assert(compact_peer("1.2.3.4", 0x5678) == "\x01\x02\x03\x04\x56\x78")
+
+local function uncompact_peer(str)
+	local a, b, c, d, port = ">I1I1I1I1I2":unpack(str)
+	return $"{a}.{b}.{c}.{d}:{port}"
+end
+assert(uncompact_peer("\x01\x02\x03\x04\x56\x78") == "1.2.3.4:22136")
+
 --[[local demo_info = be_encode({
 	name = "lol",
 	length = 0x10 * 10000,
@@ -104,6 +117,7 @@ for io.listdir("torrents") as file do
 end
 
 local sched = new scheduler()
+
 socket.bind(sched, 6881, |s| -> do
 	xpcall(function()
 		local handshake = s:recv()
@@ -168,4 +182,27 @@ socket.bind(sched, 6881, |s| -> do
 	s:close()
 end)
 print("Bound to TCP/6881")
+
+sched:add(function()
+	local serv = socket.udpserver(6881)
+	print("Bound to UDP/6881")
+	while data := serv:recv() do
+		print({ serv:getpeer() }:concat(":") .. " - " .. data:tohex())
+		if data:byte(1) == 0x64 then
+			local d = be_decode(data)
+			print(dumpvar(d))
+			serv:send(be_encode{
+				t = d.t,
+				y = "r",
+				r = {
+					id = "Sainan/magnet-seeder",
+					token = ":)",
+					nodes = compact_peer(serv:getpeer()),
+				},
+				ip = compact_peer(serv:getpeer()), -- BEP 42
+			})
+		end
+	end
+end)
+
 sched:run()
