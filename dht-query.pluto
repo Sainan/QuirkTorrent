@@ -1,0 +1,89 @@
+if not arg[1] then
+	print("Syntax: pluto dht-query.pluto <infohash>")
+	return
+end
+
+package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1])
+
+local { base32, socket } = require "*"
+local { be_encode, be_decode } = require "bencoding"
+
+local my_node_id = range(20):map(|| -> string.char(math.random(0, 0xff))):concat("")
+local info_hash = arg[1]:fromhex()
+assert(#info_hash == 20) -- TODO: Support base32 format? lol
+
+local function compact_peer(ip, port)
+	local tmp = ip:split("."):map(|x| -> ">I1":pack(tonumber(x)))
+	tmp:insert(">I2":pack(port))
+	return tmp:concat("")
+end
+assert(compact_peer("1.2.3.4", 0x5678) == "\x01\x02\x03\x04\x56\x78")
+
+local function uncompact_peer(str)
+	local a, b, c, d, port = ">I1I1I1I1I2":unpack(str)
+	return $"{a}.{b}.{c}.{d}", port
+end
+assert({ uncompact_peer("\x01\x02\x03\x04\x56\x78") }:concat(":") == "1.2.3.4:22136")
+
+local function recv_with_timeout(s)
+	local deadline = os.millis() + 3000
+	while deadline > os.millis() do
+		if s:peek() then
+			return s:recv()
+		end
+	end
+	return nil -- same as socket.recv on a closed TCP socket
+end
+
+local nodes = {}
+nodes[compact_peer("185.157.221.247", 25401)] = false -- dht.libtorrent.org:25401
+nodes[compact_peer("82.221.103.244", 6881)] = false -- router.utorrent.com:6881
+nodes[compact_peer("67.215.246.10", 6881)] = false -- router.bittorrent.com:6881
+while true do
+	for peer, tried in nodes do
+		if not tried then
+			local ip, port = uncompact_peer(peer)
+			io.write("Querying "..ip..":"..port.."... ")
+			local s = socket.connect(ip, port, "udp")
+			s:send(be_encode{ t = "aa", y = "q", q = "get_peers", a = { id = my_node_id, info_hash = info_hash }, ro = 1 })
+			nodes[peer] = true
+			local data = recv_with_timeout(s)
+			if data then
+				data = be_decode(data)
+				if data.r?.values then
+					print("Got the following peers for the requested infohash:")
+					for data.r.values as value do
+						print("- " .. ({ uncompact_peer(value) }:concat(":")))
+					end
+
+					io.write("magnet:?xt=urn:btih:" .. base32.encode(info_hash))
+					for data.r.values as value do
+						io.write("&x.pe=")
+						io.write({ uncompact_peer(value) }:concat(":"))
+					end
+					print()
+
+					break 2
+				elseif data.r?.nodes then
+					local nn = 0
+					for i = 1, #data.r.nodes, 26 do
+						--print(data.r.nodes:sub(i, i + 20):tohex())
+						--print(uncompact_peer(data.r.nodes:sub(i + 20, i + 25)))
+						if nodes[data.r.nodes:sub(i + 20, i + 25)] == nil then
+							nodes[data.r.nodes:sub(i + 20, i + 25)] = false
+							++nn
+						end
+					end
+					print("Provided " .. (#data.r.nodes // 26) .. " nodes (" .. nn .. " new)")
+				else
+					print("Unexpected response: " .. dumpvar(data))
+				end
+			else
+				print("Timed out")
+			end
+			continue 2
+		end
+	end
+	print("Tried all nodes without luck. :(")
+	break
+end
