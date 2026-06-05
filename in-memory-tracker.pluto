@@ -1,0 +1,99 @@
+local re_announce_interval <const> = 5 * 60 -- Should be reasonable enough for this use-case
+
+local { crypto, socket } = require "*"
+
+local function compact_ip(ip)
+	return ip:split("."):map(|x| -> ">I1":pack(tonumber(x))):concat("")
+end
+assert(compact_ip("1.2.3.4") == "\x01\x02\x03\x04")
+
+local swarms = {}
+local function get_swarm(info_hash)
+	local swarm = swarms[info_hash]
+	if not swarm then
+		swarm = {}
+		swarms[info_hash] = swarm
+	end
+	return swarm
+end
+
+local secret = math.random(0, 0xffffffff)
+local function get_ip_cookie(ip)
+	return (">I8":unpack(crypto.sha1(ip .. ":" .. secret, true)))
+end
+
+local serv = socket.udpserver(1337)
+print("Bound to UDP/1337")
+while data := serv:recv() do
+	xpcall(function()
+		local cookie, action, transaction_id = ">i8I4I4":unpack(data)
+		if action == 0 then
+			if cookie == 0x41727101980 then
+				serv:send(">I4I4i8":pack(0, transaction_id, get_ip_cookie(serv:getpeer())))
+			else
+				serv:send(">I4I4":pack(3, transaction_id) .. "invalid cookie")
+			end
+		elseif action == 1 then
+			local ip = serv:getpeer()
+			if cookie ~= get_ip_cookie(ip) then
+				serv:send(">I4I4":pack(3, transaction_id) .. "invalid cookie")
+				return
+			end
+
+			-- @pluto_warnings disable-next
+			local info_hash, peer_id, downloaded, left, uploaded, event, reported_ip, key, num_want, port = ">c20c20I8I8I8I4I4I4i4I2":unpack(data, 17)
+			--print(dumpvar($object(info_hash, peer_id, downloaded, left, uploaded, event, ip, key, num_want, port)))
+			if reported_ip ~= 0 then
+				serv:send(">I4I4":pack(3, transaction_id) .. "ip must be set to 0")
+				return
+			end
+
+			local swarm = get_swarm(info_hash)
+			local cip = compact_ip(ip)
+			if event < 3 then
+				if not swarm[cip] then
+					--print("Added " .. ip .. " to " .. info_hash:tohex())
+					swarm[cip] = {}
+				end
+				swarm[cip].cport = ">I2":pack(port)
+				swarm[cip].seed = (left == 0)
+				-- TODO: Remove peers that haven't reannounced themselves in a good while?
+			else
+				--[[if swarm[cip] then
+					print("Removed " .. ip .. " from " .. info_hash:tohex())
+				end]]
+				swarm[cip] = nil
+			end
+
+			local cpeers = {}
+			local leechers = 0
+			local seeders = 0
+			for peer_cip, peer in swarm do
+				if peer.seed then
+					++seeders
+				else
+					++leechers
+				end
+				if peer_cip ~= cip then
+					cpeers:insert(peer_cip)
+					cpeers:insert(peer.cport)
+					-- TODO: Limit + randomise when swarm has more than 50 (or num_want) peers?
+				end
+			end
+			-- TODO: Insert random cpeers for plausible deniability?
+			serv:send(">I4I4I4i4i4":pack(1, transaction_id, re_announce_interval, leechers, seeders) .. cpeers:concat(""))
+		elseif action == 2 then
+			--[[print(serv:getpeer() .. " - Scrape: " .. data:tohex())
+			local i = 17
+			while i + 20 <= #data do
+				local info_hash = data:sub(i, i + 20)
+				i += 20
+				print(serv:getpeer() .. " - Scrape for " .. info_hash:tohex())
+			end]]
+			serv:send(">I4I4":pack(3, transaction_id) .. "scrape not supported")
+			-- I actually didn't seem to get any scrape requests during testing, but it would also be a bit awkward with the "downloaded" field as this is hard to track.
+		end
+	end, function(e)
+		print(e)
+	end)
+end
