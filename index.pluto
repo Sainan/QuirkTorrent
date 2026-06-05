@@ -1,63 +1,7 @@
+package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1])
+
 local { crypto, scheduler, socket } = require "*"
-
-local function be_encode(data)
-	if type(data) == "string" then
-		return #data .. ":" .. data
-	elseif type(data) == "number" then
-		return "i" .. data .. "e"
-	elseif type(data) == "table" then
-		if #data == 0 then
-			local str = "d"
-			local keys = data:keys():sort()
-			for keys as key do
-				--assert(type(key) == "string")
-				str ..= be_encode(key)
-				str ..= be_encode(data[key])
-			end
-			return str .. "e"
-		else
-			local str = "l"
-			for data as value do
-				str ..= be_encode(value)
-			end
-			return str .. "e"
-		end
-	else
-		error("Unexpected type of data: "..type(data))
-	end
-end
-
-local function be_decode(data, i = 1)
-	if data[i] == "i" then
-		local e = data:find("e", i)
-		return tonumber(data:sub(i + 1, e - 1)), e + 1
-	elseif data[i] == "d" then
-		++i
-		local t = {}
-		while data[i] ~= "e" do
-			local key, value
-			key, i = be_decode(data, i)
-			--assert(type(key) == "string")
-			value, i = be_decode(data, i)
-			t[key] = value
-		end
-		return t, i + 1
-	elseif data[i] == "l" then
-		++i
-		local t = {}
-		while data[i] ~= "e" do
-			local value
-			value, i = be_decode(data, i)
-			t:insert(value)
-		end
-		return t, i + 1
-	else
-		local c = data:find(":", i)
-		local l = tonumber(data:sub(i, c - 1))
-		i = c + 1
-		return data:sub(i, i + l - 1), i + l
-	end
-end
+local { be_encode, be_decode } = require "bencoding"
 
 local function bt_recv(s)
 	local data = s:recv()
