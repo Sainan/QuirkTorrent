@@ -1,0 +1,27 @@
+if not arg[1] do
+	print("Syntax: pluto json2benc.pluto <file>")
+	return
+end
+
+package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1])
+
+local { base64, json } = require "*"
+local { be_encode } = require "bencoding"
+
+local function recursively_process(t: table): void
+	for k, v in t do
+		if type(v) == "table" do
+			if v["$base64"] do
+				t[k] = base64.decode(v["$base64"])
+			else
+				recursively_process(v)
+			end
+		end
+	end
+end
+
+local data = json.decode(io.contents(arg[1]))
+local ext = data.info ? ".torrent" : ".benc"
+recursively_process(data)
+io.contents(arg[1]..ext, be_encode(data))
+print("Created "..arg[1]..ext)
