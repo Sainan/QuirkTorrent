@@ -41,8 +41,8 @@ while data := serv:recv() do
 			end
 
 			-- @pluto_warnings disable-next
-			local info_hash, peer_id, downloaded, left, uploaded, event, reported_ip, key, num_want, port = ">c20c20I8I8I8I4I4I4i4I2":unpack(data, 17)
-			--print(dumpvar($object(info_hash, peer_id, downloaded, left, uploaded, event, ip, key, num_want, port)))
+			local info_hash, peer_id, downloaded, left, uploaded, event, reported_ip, key, num_want, port = ">c20c20I8I8I8I4I4I4I4I2":unpack(data, 17)
+			--print(dumpvar($object(info_hash, peer_id, downloaded, left, uploaded, event, reported_ip, key, num_want, port)))
 			if reported_ip ~= 0 then
 				serv:send(">I4I4":pack(3, transaction_id) .. "ip must be set to 0")
 				return
@@ -56,7 +56,7 @@ while data := serv:recv() do
 					swarm[cip] = {}
 				end
 				swarm[cip].cport = ">I2":pack(port)
-				swarm[cip].seed = (left == 0)
+				swarm[cip].seed = (left == 0) -- left seems to be reported as 16384 when resolving a magnet, so this works.
 				-- TODO: Remove peers that haven't reannounced themselves in a good while?
 			else
 				--[[if swarm[cip] then
@@ -74,11 +74,13 @@ while data := serv:recv() do
 				else
 					++leechers
 				end
-				if peer_cip ~= cip then
+				if peer_cip ~= cip and num_want ~= 0 then
 					cpeers:insert(peer_cip)
 					cpeers:insert(peer.cport)
-					-- TODO: Limit + randomise when swarm has more than 50 (or num_want) peers?
 				end
+			end
+			while #cpeers > num_want do
+				cpeers:remove(math.random(1, #cpeers))
 			end
 			-- TODO: Insert random cpeers for plausible deniability?
 			serv:send(">I4I4I4i4i4":pack(1, transaction_id, re_announce_interval, leechers, seeders) .. cpeers:concat(""))
