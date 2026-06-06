@@ -1,0 +1,19 @@
+if not arg[1] then
+	print("Syntax: pluto settrackers.pluto <.torrent file> [tracker urls ...]")
+	return
+end
+
+package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1])
+
+local { be_encode, be_decode } = require "bencoding"
+
+local metainfo = be_decode(io.contents(arg[1]))
+metainfo.announce = arg[2]
+metainfo["announce-list"] = {}
+for i = 2, #arg do
+	local tier = { arg[i] }
+	metainfo["announce-list"]:insert(tier)
+end
+--print(dumpvar(metainfo.announce))
+--print(dumpvar(metainfo["announce-list"]))
+io.contents(arg[1], be_encode(metainfo))
