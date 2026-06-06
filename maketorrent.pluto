@@ -1,5 +1,5 @@
 if not arg[1] then
-	print("Syntax: pluto maketorrent.pluto <file or folder>")
+	print("Syntax: pluto maketorrent.pluto <file or folder> [--pad]")
 	return
 end
 
@@ -7,6 +7,8 @@ package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1]
 
 local { crypto } = require "*"
 local { be_encode } = require "bencoding"
+
+local pad <const> = (arg[2] == "--pad")
 
 local pieces = {}
 local piece_length <const> = 0x1000
@@ -35,6 +37,18 @@ if io.isdir(arg[1]) then
 					path = pathv,
 					length = length,
 				})
+				if pad and #pending_piece ~= 0 then
+					local pad_len = piece_length - #pending_piece
+					pending_piece ..= string.rep("\0", pad_len)
+					assert(#pending_piece == piece_length)
+					pieces:insert(crypto.sha1(pending_piece, true))
+					pending_piece = ""
+					files:insert({
+						path = { ".pad", tostring(pad_len) },
+						length = pad_len,
+						attr = "p",
+					})
+				end
 			end
 		end
 	end
