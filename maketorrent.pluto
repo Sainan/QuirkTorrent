@@ -1,5 +1,5 @@
 if not arg[1] then
-	print("Syntax: pluto maketorrent.pluto <file>")
+	print("Syntax: pluto maketorrent.pluto <file or folder>")
 	return
 end
 
@@ -8,19 +8,59 @@ package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1]
 local { crypto } = require "*"
 local { be_encode } = require "bencoding"
 
-local fh = io.open(arg[1], "rb")
 local pieces = {}
 local piece_length <const> = 0x1000
-local length = 0
-while data := fh:read(piece_length) do
-	pieces:insert(crypto.sha1(data, true))
-	length += #data
+local info
+if io.isdir(arg[1]) then
+	local pending_piece = ""
+	local files = {}
+	local function index_folder(folder_path, pathv_base)
+		for io.listdir(folder_path) as path do
+			local pathv = pathv_base:clone()
+			pathv:insert(io.part(path, "name"))
+			if io.isdir(path) then
+				index_folder(path, pathv)
+			else
+				local fh <close> = io.open(path, "rb")
+				local length = 0
+				while data := fh:read(piece_length - #pending_piece) do
+					length += #data
+					pending_piece ..= data
+					if #pending_piece == piece_length then
+						pieces:insert(crypto.sha1(pending_piece, true))
+						pending_piece = ""
+					end
+				end
+				files:insert({
+					path = pathv,
+					length = length,
+				})
+			end
+		end
+	end
+	index_folder(arg[1], {})
+	if #pending_piece ~= 0 then
+		pieces:insert(crypto.sha1(pending_piece, true))
+	end
+	info = be_encode({
+		name = arg[1],
+		files = files,
+		["piece length"] = piece_length,
+		pieces = pieces:concat(""),
+	})
+else
+	local fh <close> = io.open(arg[1], "rb")
+	local length = 0
+	while data := fh:read(piece_length) do
+		length += #data
+		pieces:insert(crypto.sha1(data, true))
+	end
+	info = be_encode({
+		name = arg[1],
+		length = length,
+		["piece length"] = piece_length,
+		pieces = pieces:concat(""),
+	})
 end
-local info = be_encode({
-	name = arg[1],
-	length = length,
-	["piece length"] = piece_length,
-	pieces = pieces:concat("")
-})
 io.contents(arg[1]..".torrent", "d4:info"..info.."e")
 print("Created "..arg[1]..".torrent (infohash "..crypto.sha1(info, false)..")")
