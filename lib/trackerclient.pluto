@@ -1,0 +1,62 @@
+local { socket } = require "*"
+local { uncompact_peer, recv_with_timeout } = require "btcommon"
+
+local udp_socks = {}
+export function get_udp_sock(host, port)
+	local k = host..":"..port
+	if not udp_socks[k] then
+		udp_socks[k] = socket.connect(host, port, "udp")
+	end
+	return udp_socks[k]
+end
+
+local udp_cookies = {}
+export function get_udp_cookie(host, port)
+	local k = host..":"..port
+	local e = udp_cookies[k]
+	if not e then
+		e = { timeout = 0 }
+		udp_cookies[k] = e
+	end
+	if e.timeout < os.unixseconds() then
+		local s = get_udp_sock(host, port)
+		local transaction_id = math.random(0, 0xffffffff)
+		s:send(">I8I4I4":pack(0x41727101980, 0, transaction_id))
+		local action, r_transaction_id, cookie = ">I4I4I8":unpack(recv_with_timeout(s) or error("Tracker is unreachable"))
+		assert(action == 0)
+		assert(r_transaction_id == transaction_id)
+		e.timeout = os.unixseconds() + 60
+		e.cookie = cookie
+	end
+	return e.cookie
+end
+
+-- event: 0 = none, 1 = completed, 2 = started, 3 = stopped 
+export function send_udp_announce(host, port, info_hash, event, downloaded = 0, left = 16384, uploaded = 0)
+	local s = get_udp_sock(host, port)
+	local cookie = get_udp_cookie(host, port)
+	local transaction_id = math.random(0, 0xffffffff)
+	local key = math.random(0, 0xffffffff)
+	local num_want <const> = -1 --event < 3 ? -1 : 0
+	local client_port <const> = 0
+	s:send(">i8I4I4c20c20I8I8I8I4I4I4i4I2":pack(cookie, 1, transaction_id, info_hash, "/Sainan/QuirkTorrent", downloaded, left, uploaded, event, 0, key, num_want, client_port))
+	local data = recv_with_timeout(s) or error("Tracker became unreachable")
+	local action, r_transaction_id, re_announce_interval, leechers, seeders, i = ">I4I4I4i4i4":unpack(data)
+	assert(action == 1)
+	assert(r_transaction_id == transaction_id)
+	local peers = {}
+	while i < #data do
+		local ip, peer_port = uncompact_peer(data:sub(i, i + 5))
+		peers:insert({
+			ip = ip,
+			port = peer_port,
+		})
+		i += 6
+	end
+	return {
+		peers = peers,
+		re_announce_interval = re_announce_interval,
+		leechers = leechers,
+		seeders = seeders,
+	}
+end

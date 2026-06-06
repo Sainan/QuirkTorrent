@@ -1,0 +1,22 @@
+export function compact_peer(ip, port)
+	local tmp = ip:split("."):map(|x| -> ">I1":pack(tonumber(x)))
+	tmp:insert(">I2":pack(port))
+	return tmp:concat("")
+end
+assert(compact_peer("1.2.3.4", 0x5678) == "\x01\x02\x03\x04\x56\x78")
+
+export function uncompact_peer(str)
+	local a, b, c, d, port = ">I1I1I1I1I2":unpack(str)
+	return $"{a}.{b}.{c}.{d}", port
+end
+assert({ uncompact_peer("\x01\x02\x03\x04\x56\x78") }:concat(":") == "1.2.3.4:22136")
+
+export function recv_with_timeout(s)
+	local deadline = os.millis() + 3000
+	while deadline > os.millis() do
+		if s:peek() then
+			return s:recv()
+		end
+	end
+	return nil -- same as socket.recv on a closed TCP socket
+end
