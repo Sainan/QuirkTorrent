@@ -1,0 +1,55 @@
+if not arg[2] then
+	print("Syntax: pluto maketorrentv2.pluto <torrent name> <file|folder ...>")
+	return
+end
+
+package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1])
+
+local { crypto } = require "*"
+local { be_encode } = require "bencoding"
+local { pad_base_layer, compute_root } = require "bt2merkle"
+
+local piece_length <const> = 0x4000 -- must be a power of 2 and at least 0x4000 in the v2 scheme
+local piece_layers = {}
+local function index(path)
+	if io.isdir(path) then
+		local out = {}
+		for io.listdir(path) as file do
+			out[io.part(file, "name")] = index(file)
+		end
+		return out
+	else
+		local fh = io.open(path, "rb")
+		local length = 0
+		local leaves = {}
+		while data := fh:read(piece_length) do
+			length += #data
+			leaves:insert(crypto.sha256(data, true))
+		end
+		local base_layer = leaves:concat("")
+		local root_hash = compute_root(pad_base_layer(base_layer))
+		piece_layers[root_hash] = base_layer -- because "piece length" is 0x4000, this is the base/leaf layer. 0x8000 would require the parent layer (with truncation - not implemented in lib/bt2merkle.pluto), and so on.
+		return {
+			[""] = {
+				["length"] = length,
+				["pieces root"] = root_hash,
+			}
+		}
+	end
+end
+local file_tree = {}
+for i = 2, #arg do
+	file_tree[arg[i]] = index(arg[i])
+end
+local metainfo = {
+	info = {
+		name = arg[1], -- qBittorrent seems to ignore this in single-file torrents in favour of the filename.
+		               -- Conversely, if multiple files are provided (within or without a folder), qBittorrent creates an implicit folder with this name despite "Content Layout: Original". Might be a bug with it?
+		["meta version"] = 2,
+		["file tree"] = file_tree,
+		["piece length"] = piece_length,
+	},
+	["piece layers"] = piece_layers,
+}
+io.contents(arg[1]..".torrent", be_encode(metainfo))
+print("Created "..arg[1]..".torrent (infohash "..crypto.sha256(be_encode(metainfo.info), false)..")")

@@ -1,0 +1,48 @@
+local { crypto } = require "*"
+
+export function num_nodes_at_layer(n)
+	return 1 << n
+end
+assert(num_nodes_at_layer(0) == 1) -- root node
+assert(num_nodes_at_layer(1) == 2)
+assert(num_nodes_at_layer(2) == 4)
+assert(num_nodes_at_layer(3) == 8)
+
+export function num_nodes_to_layer(n)
+	return math.ceil(math.log(n, 2))
+end
+assert(num_nodes_to_layer(1) == 0) -- root node
+assert(num_nodes_to_layer(2) == 1)
+assert(num_nodes_to_layer(3) == 2)
+assert(num_nodes_to_layer(4) == 2)
+assert(num_nodes_to_layer(5) == 3)
+assert(num_nodes_to_layer(6) == 3)
+assert(num_nodes_to_layer(7) == 3)
+assert(num_nodes_to_layer(8) == 3)
+
+export function compute_parent_layer(layer)
+	local out_size = num_nodes_at_layer(num_nodes_to_layer(#layer // 32) - 1)
+	local out = {}
+	for i = 0, out_size - 1 do
+		local nodes_concated = layer:sub(1 + i * 64, i * 64 + 64)
+		assert(#nodes_concated == 64, "layer must not be truncated")
+		out:insert(crypto.sha256(nodes_concated, true))
+	end
+	return out:concat("")
+end
+
+export function pad_base_layer(layer)
+	local num_nodes_provided = #layer // 32
+	local num_nodes = num_nodes_at_layer(num_nodes_to_layer(num_nodes_provided))
+	if num_nodes_provided < num_nodes then
+		layer ..= string.rep("\0", (num_nodes - num_nodes_provided) * 32)
+	end
+	return layer
+end
+
+export function compute_root(layer)
+	while #layer ~= 32 do
+		layer = compute_parent_layer(layer)
+	end
+	return layer
+end
