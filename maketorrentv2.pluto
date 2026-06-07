@@ -1,5 +1,5 @@
 if not arg[2] then
-	print("Syntax: pluto maketorrentv2.pluto <torrent name> <file|folder ...>")
+	print("Syntax: pluto maketorrentv2.pluto <torrent name> <file|folder ...> [--private]")
 	return
 end
 
@@ -38,8 +38,13 @@ local function index(path)
 	end
 end
 local file_tree = {}
+local private = false
 for i = 2, #arg do
-	file_tree[arg[i]] = index(arg[i])
+	if arg[i] == "--private" then
+		private = true
+	else
+		file_tree[arg[i]] = index(arg[i])
+	end
 end
 local metainfo = {
 	info = {
@@ -48,6 +53,7 @@ local metainfo = {
 		["meta version"] = 2,
 		["file tree"] = file_tree,
 		["piece length"] = piece_length,
+		private = private ? 1 : nil,
 	},
 	["piece layers"] = piece_layers,
 }

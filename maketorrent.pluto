@@ -1,5 +1,5 @@
 if not arg[1] then
-	print("Syntax: pluto maketorrent.pluto <file or folder> [--pad]")
+	print("Syntax: pluto maketorrent.pluto <file or folder> [--private] [--pad]")
 	return
 end
 
@@ -8,7 +8,14 @@ package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1]
 local { crypto } = require "*"
 local { be_encode } = require "bencoding"
 
-local pad <const> = (arg[2] == "--pad")
+local private = false
+local pad = false
+for i = 2, #arg do
+	switch arg[i] do
+		case "--private": private = true break
+		case "--pad": pad = true break
+	end
+end
 
 local pieces = {}
 local piece_length <const> = 0x1000
@@ -61,6 +68,7 @@ if io.isdir(arg[1]) then
 		files = files,
 		["piece length"] = piece_length,
 		pieces = pieces:concat(""),
+		private = private ? 1 : nil,
 	})
 else
 	local fh <close> = io.open(arg[1], "rb")
@@ -74,6 +82,7 @@ else
 		length = length,
 		["piece length"] = piece_length,
 		pieces = pieces:concat(""),
+		private = private ? 1 : nil,
 	})
 end
 io.contents(arg[1]..".torrent", "d4:info"..info.."e")
