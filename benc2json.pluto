@@ -5,27 +5,27 @@ end
 
 package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1])
 
-local { base64, json } = require "*"
+local { --[[base64,]] json } = require "*"
 local { be_decode } = require "bencoding"
 
-local function is_print(str: string): boolean
+--[[local function is_print(str: string): boolean
 	for i = 1, #str do
 		if str:byte(i) > 0x7f do
 			return false
 		end
 	end
 	return true
-end
+end]]
 
 local function recursively_process(t: table): void
 	for k, n in t do
 		if type(n) == "table" do
 			recursively_process(n)
-		elseif type(n) == "string" do
+		--[[elseif type(n) == "string" do
 			-- While not a problem with Pluto, "standard" JSON doesn't allow binary strings (they have to be valid UTF-16).
 			if !is_print(n) do
 				t[k] = { ["$base64"] = base64.encode(n) }
-			end
+			end]]
 		end
 	end
 	if !t[1] do
