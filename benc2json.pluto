@@ -15,25 +15,22 @@ local { be_decode } = require "bencoding"
 		end
 	end
 	return true
-end]]
+end
 
 local function recursively_process(t: table): void
 	for k, n in t do
 		if type(n) == "table" do
 			recursively_process(n)
-		--[[elseif type(n) == "string" do
+		elseif type(n) == "string" do
 			-- While not a problem with Pluto, "standard" JSON doesn't allow binary strings (they have to be valid UTF-16).
 			if !is_print(n) do
 				t[k] = { ["$base64"] = base64.encode(n) }
-			end]]
+			end
 		end
 	end
-	if !t[1] do
-		t.__order = t:keys():sort()
-	end
-end
+end]]
 
-local data = be_decode(io.contents(arg[1]))
-recursively_process(data)
+local data = be_decode(io.contents(arg[1]), 1, true)
+--recursively_process(data)
 io.contents(arg[1]..".json", json.encode(data, true))
 print("Created "..arg[1]..".json")

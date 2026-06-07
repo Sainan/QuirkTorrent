@@ -1,22 +1,25 @@
-export function be_encode(data)
+-- @param dicts_have_order fixes the fact that empty lists cannot be produced by this function normally. Note that the given order is not respected as per the bencoding specification.
+export function be_encode(data, dicts_have_order)
 	if type(data) == "string" then
 		return #data .. ":" .. data
 	elseif type(data) == "number" then
 		return "i" .. data .. "e"
 	elseif type(data) == "table" then
-		if #data == 0 then
+		if dicts_have_order ? data.__order : #data == 0 then
 			local str = "d"
 			local keys = data:keys():sort()
 			for keys as key do
 				--assert(type(key) == "string")
-				str ..= be_encode(key)
-				str ..= be_encode(data[key])
+				if key ~= "__order" then
+					str ..= be_encode(key, dicts_have_order)
+					str ..= be_encode(data[key], dicts_have_order)
+				end
 			end
 			return str .. "e"
 		else
 			local str = "l"
 			for data as value do
-				str ..= be_encode(value)
+				str ..= be_encode(value, dicts_have_order)
 			end
 			return str .. "e"
 		end
@@ -25,18 +28,24 @@ export function be_encode(data)
 	end
 end
 
-export function be_decode(data, i = 1)
+export function be_decode(data, i = 1, with_order)
 	if data[i] == "i" then
 		local e = data:find("e", i)
 		return tonumber(data:sub(i + 1, e - 1)), e + 1
 	elseif data[i] == "d" then
 		++i
 		local t = {}
+		if with_order then
+			t.__order = {}
+		end
 		while data[i] ~= "e" do
 			local key, value
-			key, i = be_decode(data, i)
+			key, i = be_decode(data, i, with_order)
 			--assert(type(key) == "string")
-			value, i = be_decode(data, i)
+			value, i = be_decode(data, i, with_order)
+			if with_order then
+				t.__order:insert(key)
+			end
 			t[key] = value
 		end
 		return t, i + 1
@@ -45,7 +54,7 @@ export function be_decode(data, i = 1)
 		local t = {}
 		while data[i] ~= "e" do
 			local value
-			value, i = be_decode(data, i)
+			value, i = be_decode(data, i, with_order)
 			t:insert(value)
 		end
 		return t, i + 1

@@ -20,8 +20,8 @@ local { be_encode } = require "bencoding"
 	end
 end]]
 
-local data = json.decode(io.contents(arg[1]))
+local data = json.decode(io.contents(arg[1]), json.withorder)
 local ext = data.info ? ".torrent" : ".benc"
 --recursively_process(data)
-io.contents(arg[1]..ext, be_encode(data))
+io.contents(arg[1]..ext, be_encode(data, true))
 print("Created "..arg[1]..ext)
