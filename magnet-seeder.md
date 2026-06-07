@@ -1,6 +1,6 @@
 # magnet-seeder
 
-A minimal BitTorrent v1 client to help resolve metadata from magnet: URIs.
+A minimal BitTorrent v1 server/peer to help resolve metadata from magnet: URIs.
 
 ## Why?
 

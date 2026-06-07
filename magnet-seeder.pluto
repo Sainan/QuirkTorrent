@@ -61,7 +61,7 @@ socket.bind(sched, 6881, |s| -> do
 				--and (extensions & 4) ~= 0 -- BEP 6
 				and (extensions & 0x100000) ~= 0 -- BEP 10
 			then
-				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x04" .. infohash .. "Sainan/magnet-seeder")
+				s:send("\x13BitTorrent protocol" .. "\x00\x00\x00\x00\x00\x10\x00\x04" .. infohash .. "pluto-bittorrent\0\0\0\0")
 				local ut_metadata
 				while data := bt_recv(s) do
 					if #data == 0 then
@@ -79,7 +79,7 @@ socket.bind(sched, 6881, |s| -> do
 									bt_send(s, ">I1I1":pack(20, 0) .. be_encode{
 										m = { ut_metadata = ut_metadata },
 										metadata_size = #info, -- Providing this field in the handshake implies knowledge of the entire info dict
-										v = "https://github.com/Sainan/magnet-seeder",
+										v = "magnet-seeder (https://github.com/Sainan/pluto-bittorrent)",
 										upload_only = 1, -- Indicate that we will not be downloading anything as per BEP 21
 									})
 								end

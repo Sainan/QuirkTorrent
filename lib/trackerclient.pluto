@@ -39,7 +39,7 @@ export function send_udp_announce(host, port, info_hash, event, downloaded = 0, 
 	local key = math.random(0, 0xffffffff)
 	local num_want <const> = -1 --event < 3 ? -1 : 0
 	local client_port <const> = 0
-	s:send(">i8I4I4c20c20I8I8I8I4I4I4i4I2":pack(cookie, 1, transaction_id, info_hash, "/Sainan/QuirkTorrent", downloaded, left, uploaded, event, 0, key, num_want, client_port))
+	s:send(">i8I4I4c20c20I8I8I8I4I4I4i4I2":pack(cookie, 1, transaction_id, info_hash, "pluto-bittorrent\0\0\0\0", downloaded, left, uploaded, event, 0, key, num_want, client_port))
 	local data = recv_with_timeout(s) or error("Tracker became unreachable")
 	local action, r_transaction_id, re_announce_interval, leechers, seeders, i = ">I4I4I4i4i4":unpack(data)
 	assert(action == 1)
