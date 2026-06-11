@@ -20,3 +20,33 @@ export function recv_with_timeout(s)
 	end
 	return nil -- same as socket.recv on a closed TCP socket
 end
+
+export function measure_content_size(path)
+	if io.isdir(path) then
+		local count = 0
+		for io.listdir(path) as file do
+			count += measure_content_size(file)
+		end
+		return count
+	end
+	return io.filesize(path)
+end
+
+export function torrent_size_to_piece_size(torrent_size)
+	-- This algorithm aims for at most 2500 pieces, starting at 32 KiB pieces (1 << 15) and capping out at 16 MiB pieces (1 << 24).
+	-- For reference: https://i.ibb.co/PsrHBwqL/piece-sizes.png
+	-- So, we can early out for >20 GiB.
+	if torrent_size > 20 * 1073741824 then
+		return 1 << 24
+	end
+	local piece_size = 1 << 15
+	while piece_size ~= 1 << 24 do
+		local num_pieces = math.ceil(torrent_size / piece_size)
+		if num_pieces < 2500 then
+			return piece_size
+		end
+		piece_size <<= 1
+	end
+	return piece_size
+end
+assert(torrent_size_to_piece_size(2 * 1073741824) == 1048576) -- 2 GiB torrent is split into 1 MiB pieces

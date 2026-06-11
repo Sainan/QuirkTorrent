@@ -7,6 +7,7 @@ package.path ..= package.config[3].."lib/?.pluto":replace("/", package.config[1]
 
 local { crypto } = require "*"
 local { be_encode } = require "bencoding"
+local { measure_content_size, torrent_size_to_piece_size } = require "btcommon"
 
 local private = false
 local pad = false
@@ -17,8 +18,10 @@ for i = 2, #arg do
 	end
 end
 
+local content_bytes = measure_content_size(arg[1])
+local piece_length = torrent_size_to_piece_size(content_bytes)
+--print(content_bytes.." content bytes, using "..piece_length.."-byte pieces.")
 local pieces = {}
-local piece_length <const> = 0x1000
 local info
 if io.isdir(arg[1]) then
 	local pending_piece = ""
