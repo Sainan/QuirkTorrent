@@ -30,6 +30,18 @@ if io.isdir(arg[1]) then
 			if io.isdir(path) then
 				index_folder(path, pathv)
 			else
+				if pad and #pending_piece ~= 0 then
+					local pad_len = piece_length - #pending_piece
+					pending_piece ..= string.rep("\0", pad_len)
+					assert(#pending_piece == piece_length)
+					pieces:insert(crypto.sha1(pending_piece, true))
+					pending_piece = ""
+					files:insert({
+						path = { ".pad", tostring(pad_len) },
+						length = pad_len,
+						attr = "p",
+					})
+				end
 				local fh <close> = io.open(path, "rb")
 				local length = 0
 				while data := fh:read(piece_length - #pending_piece) do
@@ -44,18 +56,6 @@ if io.isdir(arg[1]) then
 					path = pathv,
 					length = length,
 				})
-				if pad and #pending_piece ~= 0 then
-					local pad_len = piece_length - #pending_piece
-					pending_piece ..= string.rep("\0", pad_len)
-					assert(#pending_piece == piece_length)
-					pieces:insert(crypto.sha1(pending_piece, true))
-					pending_piece = ""
-					files:insert({
-						path = { ".pad", tostring(pad_len) },
-						length = pad_len,
-						attr = "p",
-					})
-				end
 			end
 		end
 	end
